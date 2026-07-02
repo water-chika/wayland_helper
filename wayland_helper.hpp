@@ -8,7 +8,6 @@
 #include <array>
 #include <source_location>
 
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
 #include <wayland-client.h>
 //#define _POSIX_C_SOURCE 200112L
 #include <errno.h>
@@ -18,8 +17,12 @@
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
+#include <poll.h>
+#include <wayland-client.h>
 
 #include "xdg-shell-client.h"
+
+namespace wayland_helper {
 
 
 static void randname(char *buf) {
@@ -328,9 +331,7 @@ static const struct xdg_toplevel_listener xdg_toplevel_listener = {
     .close = xdg_toplevel_close,
 };
 
-#include <wayland-client.h>
 
-namespace wl_helper {
 inline wl_display *display_connect(const char *name) {
   return wl_display_connect(name);
 }
@@ -440,11 +441,6 @@ public:
 private:
   wl_surface *m_surface;
 };
-} // namespace wl_helper
-
-
-using namespace wl_helper;
-
 
 
 void water_chika_set_size_changed_callback(
@@ -458,11 +454,17 @@ void water_chika_set_size_changed_callback(
       state.size_changed_callback_user_data = user_data;
 }
 
-#endif
+template<typename T>
+using add_wayland_surface_parent =
+    add_display<
+    set_default_display_name<
+    T
+    >>
+;
 
-template <class T> class add_wayland_surface : public T {
+template <class T> class add_wayland_surface : public add_wayland_surface_parent<T> {
 public:
-    using parent = T;
+    using parent = add_wayland_surface_parent<T>;
     static void dummy_size_changed_callback(int, int, void*) {
     }
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
@@ -556,7 +558,6 @@ public:
   }
 };
 
-#include <poll.h>
 template<typename T>
 class add_wayland_pollfd : public T {
 public:
@@ -582,3 +583,5 @@ public:
         parent::process_events(fds);
     }
 };
+
+} // namespace wayland_helper
