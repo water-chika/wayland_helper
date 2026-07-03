@@ -77,6 +77,8 @@ struct our_state {
   struct wl_keyboard *keyboard;
   void (*keymap_callback)(int, int, void*);
   void* keymap_callback_user_data;
+  void (*keyboard_modifiers_callback)(uint32_t, uint32_t, uint32_t, uint32_t, void*);
+  void* keyboard_modifiers_callback_user_data;
   void (*key_callback)(int, int, void*);
   void* key_callback_user_data;
   struct wl_pointer *pointer;
@@ -160,6 +162,13 @@ static void wl_keyboard_key(void* data, struct wl_keyboard* keyboard,
 
 static void wl_keyboard_modifiers(void* data, struct wl_keyboard* keyboard,
         uint32_t serial, uint32_t mods_depressed, uint32_t mods_latched, uint32_t mods_locked, uint32_t group) {
+    std::clog << "wayland: keyboard: modifiers: " <<
+        std::format("{}, {:#x}, {:#x}, {:#x}, {:#x}", serial, mods_depressed, mods_latched, mods_locked, group)
+        << std::endl;
+    struct our_state *state = (struct our_state *)data;
+    if (state->keyboard_modifiers_callback) {
+        state->keyboard_modifiers_callback(mods_depressed, mods_latched, mods_locked, group, state->key_callback_user_data);
+    }
 }
 
 static void wl_keyboard_repeat_info(void* data, struct wl_keyboard* keyboard,
@@ -515,6 +524,13 @@ public:
       state.keymap_callback_user_data = user_data;
 #endif
   }
+  void set_keyboard_modifiers_callback(void (*callback)(uint32_t, uint32_t, uint32_t, uint32_t, void*), void* user_data) {
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+      state.keyboard_modifiers_callback = callback;
+      state.keyboard_modifiers_callback_user_data = user_data;
+#endif
+  }
+
   void set_pointer_motion_callback(void (*callback)(uint32_t, uint32_t, void*), void* user_data) {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
       state.pointer_motion_callback = callback;
