@@ -281,6 +281,7 @@ static const struct wl_seat_listener wl_seat_listener = {
 static void registry_handle_global(void *data, struct wl_registry *registry,
                                    uint32_t name, const char *interface,
                                    uint32_t version) {
+  std::clog << "wayland: interface: ";
   struct our_state *state = (struct our_state *)data;
   if (strcmp(interface, wl_compositor_interface.name) == 0) {
     state->compositor = (wl_compositor *)wl_registry_bind(
@@ -301,8 +302,9 @@ static void registry_handle_global(void *data, struct wl_registry *registry,
     wl_seat_add_listener(state->seat, &wl_seat_listener, state);
   }
   else {
-    std::clog << "wayland: not handled interface: " << interface << "(v" << version << ")" << std::endl;
+    std::clog << "not handled: ";
   }
+  std::clog << "" << interface << "(v" << version << ")" << std::endl;
 }
 static void registry_handle_global_remove(void *data,
                                           struct wl_registry *registry,
