@@ -552,10 +552,12 @@ private:
 #endif
 };
 
+using cpp_helper::configure;
+
 template <class T> class add_wayland_event_loop : public T {
 public:
   using parent = T;
-  add_wayland_event_loop(const vulkan_hpp_helper::configure auto& conf) : parent{conf} {
+  add_wayland_event_loop(const configure auto& conf) : parent{conf} {
   }
   void event_loop() {
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
@@ -580,6 +582,8 @@ template<typename T>
 class add_wayland_pollfd : public T {
 public:
     using parent = T;
+    add_wayland_pollfd(const configure auto& conf) : parent{conf} {
+    }
     static constexpr int FDS_INDEX = parent::FDS_SIZE;
     static constexpr int FDS_SIZE = parent::FDS_SIZE+1;
     std::array<struct pollfd, FDS_SIZE> get_fds() {
@@ -590,15 +594,37 @@ public:
             .fd = wl_display_get_fd(parent::get_wayland_display()),
             .events = POLLIN,
         };
+        auto display = parent::get_wayland_display();
+        while (wl_display_prepare_read(display) != 0)
+            wl_display_dispatch_pending(display);
+        wl_display_flush(display);
         return res;
     }
     void process_events(auto& fds) {
+        auto display = parent::get_wayland_display();
         if (fds[FDS_INDEX].revents & POLLIN) {
-            auto display = parent::get_wayland_display();
+            assert(fds[FDS_INDEX].fd == wl_display_get_fd(display));
             wl_display_read_events(display);
             wl_display_dispatch_pending(display);
         }
+        else {
+            wl_display_cancel_read(display);
+        }
+
         parent::process_events(fds);
+    }
+};
+
+template<typename T>
+class add_wayland_pollfds_loop : public T {
+public:
+    using parent = T;
+    add_wayland_pollfds_loop(const configure auto& conf) : parent{conf} {
+    }
+    void event_loop() {
+        while (!parent::get_event_loop_should_exit()) {
+            parent::poll_events();
+        }
     }
 };
 
