@@ -86,6 +86,8 @@ struct our_state {
   void* pointer_motion_callback_user_data;
   void (*pointer_button_callback)(int button, int button_state, void*);
   void* pointer_button_callback_user_data;
+  void (*pointer_axis_callback)(uint32_t axis, int value, void*);
+  void* pointer_axis_callback_user_data;
 
   struct wl_surface *surface;
   struct xdg_surface *xdg_surface;
@@ -204,8 +206,12 @@ static void wl_pointer_button(void* data, struct wl_pointer* pointer, uint32_t s
         state->pointer_button_callback(button, button_state, state->pointer_button_callback_user_data);
     }
 }
-static void wl_pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time, uint32_t axis, int value) {
+static void wl_pointer_axis(void* data, struct wl_pointer* pointer, uint32_t time, uint32_t axis, wl_fixed_t value) {
     //std::clog << "wayland: " << std::source_location::current().function_name() << std::endl;
+    struct our_state *state = (struct our_state *)data;
+    if (state->pointer_axis_callback) {
+        state->pointer_axis_callback(axis, wl_fixed_to_int(value), state->pointer_axis_callback_user_data);
+    }
 }
 static void wl_pointer_frame(void* data, struct wl_pointer* pointer) {
     //std::clog << "wayland: " << std::source_location::current().function_name() << std::endl;
@@ -543,6 +549,12 @@ public:
 #ifdef VK_USE_PLATFORM_WAYLAND_KHR
       state.pointer_button_callback = callback;
       state.pointer_button_callback_user_data = user_data;
+#endif
+  }
+  void set_pointer_axis_callback(void (*callback)(uint32_t, int, void*), void* user_data) {
+#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+      state.pointer_axis_callback = callback;
+      state.pointer_axis_callback_user_data = user_data;
 #endif
   }
 
