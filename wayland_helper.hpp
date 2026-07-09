@@ -139,6 +139,7 @@ static void wl_keyboard_keymap(void* data, struct wl_keyboard* keyboard,
             state->keymap_callback(fd, size, state->keymap_callback_user_data);
         }
     }
+    close(fd);
 }
 
 static void wl_keyboard_enter(void* data, struct wl_keyboard* keyboard,
