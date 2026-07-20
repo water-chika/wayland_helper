@@ -67,80 +67,6 @@ int allocate_shm_file(size_t size) {
 
 #define PROJECT_NAME "test_wayland"
 
-struct our_state {
-  struct wl_display *display;
-  struct wl_registry *registry;
-  struct wl_compositor *compositor;
-  struct wl_shm *shm;
-  struct xdg_wm_base *wm_base;
-  struct wl_surface *surface;
-  struct xdg_surface *xdg_surface;
-  struct xdg_toplevel *toplevel;
-
-  float offset;
-  uint32_t last_frame;
-  int width, height;
-  bool closed;
-  bool size_changed;
-  void (*size_changed_callback)(int, int, void*);
-  void* size_changed_callback_user_data;
-};
-
-static void buffer_release(void *data, struct wl_buffer *buffer) {
-  wl_buffer_destroy(buffer);
-}
-static const struct wl_buffer_listener buffer_listener = {
-    .release = buffer_release,
-};
-
-static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
-                                  uint32_t serial) {
-  struct our_state *state = (struct our_state *)data;
-  xdg_surface_ack_configure(xdg_surface, serial);
-}
-
-static const struct xdg_surface_listener xdg_surface_listener = {
-    .configure = xdg_surface_configure,
-};
-
-static void xdg_wm_base_ping(void *data, struct xdg_wm_base *xdg_wm_base,
-                             uint32_t serial) {
-  xdg_wm_base_pong(xdg_wm_base, serial);
-}
-
-static const struct xdg_wm_base_listener xdg_wm_base_listener = {
-    .ping = xdg_wm_base_ping,
-};
-
-
-static void xdg_toplevel_configure(void *data,
-                                   struct xdg_toplevel *xdg_toplevel,
-                                   int32_t width, int32_t height,
-                                   struct wl_array *states) {
-  struct our_state *state = (struct our_state *)data;
-  if (width == 0 || height == 0) {
-    return;
-  }
-  if (width != state->width || height != state->height) {
-      state->width = width;
-      state->height = height;
-      state->size_changed = true;
-      state->size_changed_callback(width, height,
-              state->size_changed_callback_user_data);
-  }
-}
-
-static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
-  struct our_state *state = (struct our_state *)data;
-  state->closed = true;
-}
-
-static const struct xdg_toplevel_listener xdg_toplevel_listener = {
-    .configure = xdg_toplevel_configure,
-    .close = xdg_toplevel_close,
-};
-
-
 inline wl_display *display_connect(const char *name) {
   return wl_display_connect(name);
 }
@@ -602,18 +528,6 @@ private:
   wl_surface *m_surface;
 };
 
-
-void water_chika_set_size_changed_callback(
-        our_state& state,
-        void (*callback)(int, int, void*), void* user_data) {
-      if (state.size_changed) {
-          callback(state.width, state.height, user_data);
-          state.size_changed = false;
-      }
-      state.size_changed_callback = callback;
-      state.size_changed_callback_user_data = user_data;
-}
-
 template<typename T>
 using add_wayland_surface_parent =
     add_registry_listener<
@@ -635,46 +549,82 @@ using add_wayland_surface_parent =
 template <class T> class add_wayland_surface : public add_wayland_surface_parent<T> {
 public:
     using parent = add_wayland_surface_parent<T>;
+    using this_type = add_wayland_surface;
     static void dummy_size_changed_callback(int, int, void*) {
     }
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-  add_wayland_surface(const vulkan_hpp_helper::configure auto& conf) : parent{conf}, state{} {
-      state.size_changed_callback = dummy_size_changed_callback;
-    state.width = 640, state.height = 480;
-    state.display = parent::get_display();
+  add_wayland_surface(const vulkan_hpp_helper::configure auto& conf) : parent{conf},
+      size_changed_callback{dummy_size_changed_callback},
+      width{640}, height{480}
+  {
+    surface = wl_compositor_create_surface(parent::get_compositor());
+    surface_xdg =
+        xdg_wm_base_get_xdg_surface(parent::get_wm_base(), surface);
 
-    state.registry = parent::get_registry();
+    static const struct xdg_toplevel_listener xdg_toplevel_listener = {
+        .configure = xdg_toplevel_configure,
+        .close = xdg_toplevel_close,
+    };
 
-    state.compositor = parent::get_compositor();
-    state.wm_base = parent::get_wm_base();
+    static const struct xdg_surface_listener xdg_surface_listener = {
+        .configure = xdg_surface_configure,
+    };
+    xdg_surface_add_listener(surface_xdg, &xdg_surface_listener, this);
+    toplevel = xdg_surface_get_toplevel(surface_xdg);
+    xdg_toplevel_set_title(toplevel, "Example client");
+    xdg_toplevel_add_listener(toplevel, &xdg_toplevel_listener, this);
+    xdg_toplevel_set_title(toplevel, "Example client");
+    wl_surface_commit(surface);
 
-    state.surface = wl_compositor_create_surface(state.compositor);
-    state.xdg_surface =
-        xdg_wm_base_get_xdg_surface(state.wm_base, state.surface);
-    xdg_surface_add_listener(state.xdg_surface, &xdg_surface_listener, &state);
-    state.toplevel = xdg_surface_get_toplevel(state.xdg_surface);
-    xdg_toplevel_set_title(state.toplevel, "Example client");
-    xdg_toplevel_add_listener(state.toplevel, &xdg_toplevel_listener, &state);
-    xdg_toplevel_set_title(state.toplevel, "Example client");
-    wl_surface_commit(state.surface);
-
-    wl_display_roundtrip(state.display);
+    wl_display_roundtrip(parent::get_display());
   }
-  auto get_wayland_display() { return state.display; }
-  auto get_wayland_surface() { return state.surface; }
-  auto get_surface_resolution() { return std::pair{state.width, state.height}; }
-  auto get_event_loop_should_exit() { return state.closed; }
-#endif
+  auto get_wayland_display() { return parent::get_display(); }
+  auto get_wayland_surface() { return surface; }
+  auto get_surface_resolution() { return std::pair{width, height}; }
+  auto get_event_loop_should_exit() { return closed; }
   void set_size_changed_callback(void (*callback)(int, int, void*), void* user_data) {
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
-      water_chika_set_size_changed_callback(state, callback, user_data);
-#endif
+      if (size_changed) {
+          callback(width, height, user_data);
+          size_changed = false;
+      }
+      size_changed_callback = callback;
+      size_changed_callback_user_data = user_data;
+  }
+  static void xdg_surface_configure(void *data, struct xdg_surface *xdg_surface,
+                                    uint32_t serial) {
+    auto this_ = (this_type*)data;
+    xdg_surface_ack_configure(this_->surface_xdg, serial);
+  }
+  static void xdg_toplevel_configure(void *data,
+                                     struct xdg_toplevel *xdg_toplevel,
+                                     int32_t width, int32_t height,
+                                     struct wl_array *states) {
+    auto this_= (this_type*)data;
+    if (width == 0 || height == 0) {
+      return;
+    }
+    if (width != this_->width || height != this_->height) {
+        this_->width = width;
+        this_->height = height;
+        this_->size_changed = true;
+        this_->size_changed_callback(width, height,
+                this_->size_changed_callback_user_data);
+    }
   }
 
-#ifdef VK_USE_PLATFORM_WAYLAND_KHR
+  static void xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
+    auto this_= (this_type*)data;
+    this_->closed = true;
+  }
+
 private:
-  struct our_state state;
-#endif
+  int width, height;
+  bool closed;
+  bool size_changed;
+  void (*size_changed_callback)(int, int, void*);
+  void* size_changed_callback_user_data;
+  xdg_surface* surface_xdg;
+  wl_surface* surface;
+  xdg_toplevel* toplevel;
 };
 
 using cpp_helper::configure;
