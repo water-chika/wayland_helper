@@ -232,6 +232,19 @@ public:
     add_pointer(const configure auto& conf) : parent{conf},
         pointer{}
     {}
+    void process_capabilities_event(wl_seat* seat, uint32_t capability) {
+        if (capability & WL_SEAT_CAPABILITY_POINTER) {
+            if (pointer == nullptr) {
+                create_pointer(wl_seat_get_pointer(seat));
+            }
+        }
+        else {
+            if (pointer != nullptr) {
+                release_pointer();
+            }
+        }
+        parent::process_capabilities_event(seat, capability);
+    }
     void create_pointer(wl_pointer* p) {
         assert(pointer == nullptr);
         pointer = p;
@@ -330,6 +343,20 @@ public:
         keyboard{}
     {
     }
+    void process_capabilities_event(wl_seat* seat, uint32_t capability) {
+        if (capability & WL_SEAT_CAPABILITY_KEYBOARD) {
+            if (keyboard == nullptr) {
+                create_keyboard(wl_seat_get_keyboard(seat));
+            }
+        }
+        else {
+            if (keyboard != nullptr) {
+                release_keyboard();
+            }
+        }
+
+        parent::process_capabilities_event(seat, capability);
+    }
     void create_keyboard(wl_keyboard* k) {
         keyboard = k;
         static const struct wl_keyboard_listener listener = {
@@ -424,6 +451,14 @@ private:
     void* key_callback_user_data;
 };
 template<typename T>
+class add_empty_process_capabilities_event : public T {
+public:
+    using parent = T;
+    add_empty_process_capabilities_event(const configure auto& conf) : parent{conf} {
+    }
+    void process_capabilities_event(wl_seat*, uint32_t){}
+};
+template<typename T>
 class add_seat : public T {
 public:
     using parent = T;
@@ -462,18 +497,7 @@ public:
         std::clog << "wayland: seat: name: " << name << std::endl;
     }
     void process_capabilities_event(wl_seat* seat, uint32_t capability) {
-        if (capability & WL_SEAT_CAPABILITY_KEYBOARD){
-            parent::create_keyboard(wl_seat_get_keyboard(seat));
-        }
-        else {
-            parent::release_keyboard();
-        }
-        if (capability & WL_SEAT_CAPABILITY_POINTER) {
-            parent::create_pointer(wl_seat_get_pointer(seat));
-        }
-        else {
-            parent::release_pointer();
-        }
+        parent::process_capabilities_event(seat, capability);
     }
 
     auto get_seat() {
@@ -536,6 +560,7 @@ using add_wayland_surface_parent =
     add_seat<
     add_pointer<
     add_keyboard<
+    add_empty_process_capabilities_event<
     add_shm<
     add_wm_base<
     add_compositor<
@@ -543,7 +568,7 @@ using add_wayland_surface_parent =
     add_display<
     set_default_display_name<
     T
-    >>>>>>>>>>>>
+    >>>>>>>>>>>>>
 ;
 
 template <class T> class add_wayland_surface : public add_wayland_surface_parent<T> {
