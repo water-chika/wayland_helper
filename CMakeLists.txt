@@ -16,5 +16,6 @@ target_include_directories(wayland_helper PUBLIC
 target_link_libraries(wayland_helper PUBLIC
     wayland-client
     wayland-xdg-shell-client
+    wayland-primary-selection-unstable-v1-client
 )
 

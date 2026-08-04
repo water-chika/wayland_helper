@@ -20,7 +20,8 @@
 #include <poll.h>
 #include <wayland-client.h>
 
-#include "xdg-shell-client.h"
+#include <xdg-shell-client.h>
+#include <primary-selection-unstable-v1-client.h>
 
 namespace wayland_helper {
 
@@ -506,6 +507,145 @@ public:
 private:
     wl_seat* seat;
 };
+template<typename T>
+class add_primary_selection : public T {
+public:
+    using parent = T;
+    using this_type = add_primary_selection<T>;
+    add_primary_selection(const configure auto& conf) : parent{conf},
+        device_manager{},
+        device{},
+        source{},
+        offer{},
+        is_selection_able{false}
+    {}
+    ~add_primary_selection() {
+        if (offer != nullptr) {
+            zwp_primary_selection_offer_v1_destroy(offer);
+            offer = nullptr;
+        }
+        if (source != nullptr) {
+            zwp_primary_selection_source_v1_destroy(source);
+            source = nullptr;
+        }
+        if (device != nullptr) {
+            zwp_primary_selection_device_v1_destroy(device);
+            device = nullptr;
+        }
+        if (device_manager != nullptr) {
+            zwp_primary_selection_device_manager_v1_destroy(device_manager);
+            device_manager = nullptr;
+        }
+    }
+    auto get_registry_binds() {
+        auto binds = parent::get_registry_binds();
+        binds.emplace_back(&device_manager, &zwp_primary_selection_device_manager_v1_interface, 1,
+                [this]() {
+                    source = zwp_primary_selection_device_manager_v1_create_source(device_manager);
+                    zwp_primary_selection_source_v1_offer(source, "text");
+                    static zwp_primary_selection_source_v1_listener listener{
+                        .send = source_send_event,
+                        .cancelled = source_cancelled_event
+                    };
+                    zwp_primary_selection_source_v1_add_listener(source, &listener, this);
+
+                    auto seat = parent::get_seat();
+                    device = zwp_primary_selection_device_manager_v1_get_device(device_manager, seat);
+                    static zwp_primary_selection_device_v1_listener device_listener{
+                        .data_offer = data_offer_event,
+                        .selection = selection_event
+                    };
+                    zwp_primary_selection_device_v1_add_listener(device, &device_listener, this);
+                });
+        return binds;
+    }
+    void process_data_offer_event(zwp_primary_selection_offer_v1* data_offer) {
+        static zwp_primary_selection_offer_v1_listener listener{
+            .offer = selection_offer_event
+        };
+        zwp_primary_selection_offer_v1_add_listener(data_offer, &listener, this);
+    }
+    static void data_offer_event(void* p, zwp_primary_selection_device_v1* device, zwp_primary_selection_offer_v1* data_offer) {
+        static zwp_primary_selection_offer_v1_listener listener {
+            .offer = selection_offer_event
+        };
+        auto t = reinterpret_cast<this_type*>(p);
+        t->process_data_offer_event(data_offer);
+    }
+    void process_selection_offer_event(zwp_primary_selection_offer_v1* data_offer, const char* mime) {
+        if (offer != data_offer) {
+            if (offer != nullptr) {
+                zwp_primary_selection_offer_v1_destroy(offer);
+            }
+            offer = data_offer;
+            is_selection_able = false;
+        }
+
+        if (!is_selection_able && strcmp(mime, "text/plain") == 0) {
+            auto ret = pipe(fildes);
+            if (ret != 0) {
+                throw std::runtime_error{"pipe create failed"};
+            }
+            int oldflags = fcntl(fildes[0], F_GETFL, 0);
+            if (oldflags == -1) {
+                throw std::runtime_error{"fcntl failed"};
+            }
+            ret = fcntl(fildes[0], F_SETFL, oldflags | O_NONBLOCK);
+            if (ret != 0) {
+                throw std::runtime_error{"fcntl failed"};
+            }
+            zwp_primary_selection_offer_v1_receive(data_offer, "text/plain", fildes[1]);
+        }
+    }
+    static void selection_offer_event(void* p, zwp_primary_selection_offer_v1* data_offer, const char* mime) {
+        std::cout << "selection: offer " << mime << std::endl;
+        auto t = reinterpret_cast<this_type*>(p);
+        t->process_selection_offer_event(data_offer, mime);
+    }
+    void process_selection_event(zwp_primary_selection_offer_v1* selection) {
+        is_selection_able = true;
+    }
+    static void selection_event(void* p, zwp_primary_selection_device_v1* device, zwp_primary_selection_offer_v1* selection) {
+        auto t = reinterpret_cast<this_type*>(p);
+        t->process_selection_event(selection);
+    }
+    auto get_selection_content() {
+        std::optional<std::vector<char>> res{};
+        if (is_selection_able) {
+            int size = 0;
+            std::vector<char> buffer(size);
+            int ret = 0;
+            do{
+                buffer.resize(size + 1024);
+                ret = read(fildes[0], buffer.data()+size, 1024);
+                if (ret < 0) {
+                    break;
+                }
+                buffer.resize(size + ret);
+            } while (ret > 0);
+            close(fildes[0]);
+            close(fildes[1]);
+            is_selection_able = false;
+
+            res = buffer;
+        }
+        return res;
+    }
+    static void source_send_event(void* p, zwp_primary_selection_source_v1* source, const char* mime, int fd) {
+        std::cout << "primary selection source send:" << mime << std::endl;
+        close(fd);
+    }
+    static void source_cancelled_event(void* p, zwp_primary_selection_source_v1* source) {
+    }
+private:
+    zwp_primary_selection_device_manager_v1* device_manager;
+    zwp_primary_selection_device_v1* device;
+    zwp_primary_selection_source_v1* source;
+
+    zwp_primary_selection_offer_v1* offer;
+    bool is_selection_able;
+    int fildes[2];
+};
 template <class T> class add_registry_listener_callbacks : public T {
 public:
   using parent = T;
@@ -527,6 +667,7 @@ public:
           wl_registry_bind(registry, name, state_interface, version);
       process_bind_event();
     }
+    std::cout << "wayland: registry handle global: " << interface << "(v" << version << ")" << std::endl;
   }
   static void registry_handle_global(void *data, wl_registry *registry,
                                      uint32_t name, const char *interface,
@@ -557,6 +698,7 @@ using add_wayland_surface_parent =
     add_registry_listener<
     cache_registry<
     add_registry_listener_callbacks<
+    add_primary_selection<
     add_seat<
     add_pointer<
     add_keyboard<
@@ -568,7 +710,7 @@ using add_wayland_surface_parent =
     add_display<
     set_default_display_name<
     T
-    >>>>>>>>>>>>>
+    >>>>>>>>>>>>>>
 ;
 
 template <class T> class add_wayland_surface : public add_wayland_surface_parent<T> {
