@@ -396,6 +396,10 @@ public:
     static void wl_keyboard_leave(void* data, struct wl_keyboard* keyboard,
             uint32_t serial, wl_surface* surface) {
         std::clog << "wayland: " << std::source_location::current().function_name() << std::endl;
+        auto this_ = (this_type *)data;
+        if (this_->keyboard_leave_callback) {
+            this_->keyboard_leave_callback(this_->keyboard_leave_callback_user_data);
+        }
     }
 
     static void wl_keyboard_key(void* data, struct wl_keyboard* keyboard,
@@ -427,6 +431,10 @@ public:
         key_callback = callback;
         key_callback_user_data = user_data;
     }
+    void set_keyboard_leave_callback(void (*callback)(void*), void* user_data) {
+        keyboard_leave_callback = callback;
+        keyboard_leave_callback_user_data = user_data;
+    }
     void set_keymap_callback(void (*callback)(int, int, void*), void* user_data) {
         keymap_callback = callback;
         keymap_callback_user_data = user_data;
@@ -450,6 +458,8 @@ private:
     void* keyboard_modifiers_callback_user_data;
     void (*key_callback)(int, int, void*);
     void* key_callback_user_data;
+    void (*keyboard_leave_callback)(void*);
+    void* keyboard_leave_callback_user_data;
 };
 template<typename T>
 class add_empty_process_capabilities_event : public T {
