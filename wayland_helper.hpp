@@ -411,6 +411,11 @@ public:
         if (this_->key_callback) {
             this_->key_callback(key, key_state, this_->key_callback_user_data);
         }
+
+        this_->latest_serial = serial;
+    }
+    auto get_latest_serial() {
+        return latest_serial;
     }
 
     static void wl_keyboard_modifiers(void* data, struct wl_keyboard* keyboard,
@@ -460,6 +465,8 @@ private:
     void* key_callback_user_data;
     void (*keyboard_leave_callback)(void*);
     void* keyboard_leave_callback_user_data;
+
+    int latest_serial;
 };
 template<typename T>
 class add_empty_process_capabilities_event : public T {
@@ -527,7 +534,9 @@ public:
         device{},
         source{},
         offer{},
-        is_selection_able{false}
+        is_selection_able{false},
+        fildes{STDIN_FILENO,STDOUT_FILENO},
+        source_content{}
     {}
     ~add_primary_selection() {
         if (offer != nullptr) {
@@ -552,7 +561,11 @@ public:
         binds.emplace_back(&device_manager, &zwp_primary_selection_device_manager_v1_interface, 1,
                 [this]() {
                     source = zwp_primary_selection_device_manager_v1_create_source(device_manager);
-                    zwp_primary_selection_source_v1_offer(source, "text");
+                    zwp_primary_selection_source_v1_offer(source, "text/plain;charset=utf-8");
+                    zwp_primary_selection_source_v1_offer(source, "UTF8_STRING");
+                    zwp_primary_selection_source_v1_offer(source, "TEXT");
+                    zwp_primary_selection_source_v1_offer(source, "text/plain");
+                    zwp_primary_selection_source_v1_offer(source, "STRING");
                     static zwp_primary_selection_source_v1_listener listener{
                         .send = source_send_event,
                         .cancelled = source_cancelled_event
@@ -613,7 +626,8 @@ public:
         t->process_selection_offer_event(data_offer, mime);
     }
     void process_selection_event(zwp_primary_selection_offer_v1* selection) {
-        is_selection_able = true;
+        if (selection)
+            is_selection_able = true;
     }
     static void selection_event(void* p, zwp_primary_selection_device_v1* device, zwp_primary_selection_offer_v1* selection) {
         auto t = reinterpret_cast<this_type*>(p);
@@ -634,18 +648,33 @@ public:
                 buffer.resize(size + ret);
             } while (ret > 0);
             close(fildes[0]);
-            close(fildes[1]);
             is_selection_able = false;
 
             res = buffer;
         }
         return res;
     }
-    static void source_send_event(void* p, zwp_primary_selection_source_v1* source, const char* mime, int fd) {
-        std::cout << "primary selection source send:" << mime << std::endl;
+
+    void set_selection_source_content(auto& content) {
+        source_content.resize(content.size());
+        std::copy(content.begin(), content.end(),
+                source_content.begin());
+        zwp_primary_selection_device_v1_set_selection(device, source, parent::get_latest_serial());
+    }
+    void process_source_send_event(zwp_primary_selection_source_v1* source, const char* mime, int fd) {
+        int ret = write(fd, source_content.data(), source_content.size());
+        if (ret != source_content.size()) {
+            throw std::runtime_error{"primary selection source send fail"};
+        }
         close(fd);
     }
+    static void source_send_event(void* p, zwp_primary_selection_source_v1* source, const char* mime, int fd) {
+        std::cout << "primary selection source send:" << mime << std::endl;
+        auto t = reinterpret_cast<this_type*>(p);
+        t->process_source_send_event(source, mime, fd);
+    }
     static void source_cancelled_event(void* p, zwp_primary_selection_source_v1* source) {
+        std::cout << "primary selection source cancelled" << std::endl;
     }
 private:
     zwp_primary_selection_device_manager_v1* device_manager;
@@ -655,6 +684,8 @@ private:
     zwp_primary_selection_offer_v1* offer;
     bool is_selection_able;
     int fildes[2];
+
+    std::vector<char> source_content;
 };
 template <class T> class add_registry_listener_callbacks : public T {
 public:
