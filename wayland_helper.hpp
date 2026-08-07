@@ -744,14 +744,13 @@ using add_wayland_surface_parent =
     add_pointer<
     add_keyboard<
     add_empty_process_capabilities_event<
-    add_shm<
     add_wm_base<
     add_compositor<
     add_empty_registy_binds<
     add_display<
     set_default_display_name<
     T
-    >>>>>>>>>>>>>>
+    >>>>>>>>>>>>>
 ;
 
 template <class T> class add_wayland_surface : public add_wayland_surface_parent<T> {
